@@ -14,6 +14,8 @@ import statsmodels.api as sm
 from statsmodels.formula.api import ols
 import pingouin as pg
 
+BASE_DIR = 'user_study_results/'
+ROOKIE_MONTH = 3
 
 old_difficulty_dict = {
         '6c1bac5c-aead-40b8-9c17-be97d86b68d4_segment1': 'Easy',
@@ -119,9 +121,9 @@ def add_difficulty(df_new, part2=False):
     #     return df_new
 
     if part2:
-        gt_dir = '/home/cyxu/hdd/ego4d_eval/AB_testing_results/part_2_merged_judgements/reviewed_judgements_v3/'
+        gt_dir = BASE_DIR + 'part_2_merged_judgements/reviewed_judgements_v3/'
     else:
-        gt_dir = '/home/cyxu/hdd/ego4d_eval/AB_testing_results/part_1_merged_judgements/reviewed_judgements_v2/'
+        gt_dir = BASE_DIR + 'part_1_merged_judgements/reviewed_judgements_v2/'
     
     clips = df_new['Clip_name'].unique()
 
@@ -203,12 +205,11 @@ def reject_outliers(df_new):
 
 def download_judgements(df, clips):
     api_key = "AXZngREC8oBJS-Hy14Wy"
-    base_dir = '/home/cyxu/hdd/ego4d_eval/AB_testing_results/'
 
     if len(clips) == 24:
-        part_dir = base_dir + 'part_1_merged_judgements/'
+        part_dir = BASE_DIR + 'part_1_merged_judgements/'
     elif len(clips) == 12:
-        part_dir = base_dir + 'part_2_merged_judgements/'
+        part_dir = BASE_DIR + 'part_2_merged_judgements/'
 
     # batch download reviewed judgements
     for i, row in df.iterrows():
@@ -241,7 +242,53 @@ def download_judgements(df, clips):
 
     return df
 
-def df_preprocess(dfs, df2, part1_clips, part1_dir, part2_clips, part2_dir):
+
+def match_id_and_tenure(df, id_tenure):
+    # build three dictionaries for three types of worker IDs to match with
+    # worker tenure in months
+    # id1, id2, id3 = {}, {}, {}
+    id_dicts = {'id1':{}, 'id2':{}, 'id3':{}}
+    missing_tenure = set()
+
+    for row in id_tenure.iterrows():
+        for id in id_dicts.keys():
+            id_str = str(row[1][id])
+            if id_str != 'N/A':
+                id_dicts[id][id_str] = int(row[1]['tenure_month'])
+
+    tenure_list = list(id_dicts['id1'].values())
+    print(f'# of rookies (< 10 months): {np.sum(np.array(tenure_list) <= ROOKIE_MONTH)}')
+    print(f'# of veterans (>= 10 months): {np.sum(np.array(tenure_list) > ROOKIE_MONTH)}')
+
+    # plot the tenure distribution as a histogram using seaborn and save it
+    sns.histplot(tenure_list, bins=60)
+    plt.savefig(BASE_DIR + 'tenure_distribution.png')
+    
+    # match worker ID and tenure
+    for i, row in df.iterrows():
+        worker_id = str(row['_worker_id'])
+        if worker_id in id_dicts['id1'].keys():
+            df.loc[i, 'tenure'] = id_dicts['id1'][worker_id]
+        elif worker_id in id_dicts['id2'].keys():
+            df.loc[i, 'tenure'] = id_dicts['id2'][worker_id]
+        else:
+            df.loc[i, 'tenure'] = -1
+
+        curr_tenure = df.loc[i, 'tenure']
+
+        if curr_tenure == -1:
+            missing_tenure.add(worker_id)
+            df.loc[i, 'tenure_group'] = 'Rookie'
+        elif curr_tenure <= ROOKIE_MONTH:
+            df.loc[i, 'tenure_group'] = 'Rookie'
+        else:
+            df.loc[i, 'tenure_group'] = 'Veteran'
+        
+    print(f'the following IDs are missing tenure: {missing_tenure}')
+
+    return df
+
+def df_preprocess(dfs, df2, part1_clips, part1_dir, part2_clips, part2_dir, id_tenure):
     groups = ['A', 'B', 'C']
     df_new = pd.DataFrame()
     df2_new = pd.DataFrame()
@@ -250,7 +297,8 @@ def df_preprocess(dfs, df2, part1_clips, part1_dir, part2_clips, part2_dir):
     for i in range(len(groups)):
         temp = dfs[i][['_unit_id', '_created_at', '_id', '_started_at', '_worker_id', 'annotation_pr', 'video_url']]
         temp.insert(0, 'Group', groups[i])
-        df_new = df_new.append(temp, ignore_index=True)
+        # df_new = df_new.append(temp, ignore_index=True)
+        df_new = pd.concat([df_new, temp], ignore_index=True)
 
     # find out the right group for part 2 jobs
     unique_workers = df_new['_worker_id'].unique()
@@ -263,7 +311,8 @@ def df_preprocess(dfs, df2, part1_clips, part1_dir, part2_clips, part2_dir):
             candidates = dfs[i][dfs[i]['_worker_id'] == worker]
             if len(candidates) > 10:
                 temp_w['Group'] = groups[i]
-                df2_new = df2_new.append(temp_w, ignore_index=True)
+                # df2_new = df2_new.append(temp_w, ignore_index=True)
+                df2_new = pd.concat([df2_new, temp_w], ignore_index=True)
 
     for g in groups:
         print(f'Part 2, Group {g}:', len(df2_new[df2_new['Group']==g]['_worker_id'].unique()))
@@ -282,6 +331,9 @@ def df_preprocess(dfs, df2, part1_clips, part1_dir, part2_clips, part2_dir):
 
     df_new = download_judgements(df_new, part1_clips)
     df2_new = download_judgements(df2_new, part2_clips)
+
+    df_new = match_id_and_tenure(df_new, id_tenure)
+    df2_new = match_id_and_tenure(df2_new, id_tenure)
 
     df_new = df_new.sort_values(by=['Start_time'])
     df2_new = df2_new.sort_values(by=['Start_time'])
@@ -360,31 +412,37 @@ def pointplot(df, base_dir, order, part_label, label='Speed', ext=''):
     hue_order = ['A', 'B', 'C']
     
     # add a new Overall to Difficulty that includes all judgements
-    df_overall = df.copy()
-    for idx, row in df.iterrows():
-        row_new = row.copy()
-        row_new['Difficulty'] = 'Overall'
-        df_overall = df_overall.append(row_new)
+    df_copy = df.copy()
+    df_copy['Difficulty'] = 'Overall'
+    df_overall = pd.concat([df, df_copy])
 
     df_temp = df_overall[df_overall['Difficulty'] == 'Overall']
 
     # plt.figure()
-    sns.set(rc={'figure.figsize':(6, 5)})
-    fig, (ax1, ax2) = plt.subplots(ncols=2, sharey=True, gridspec_kw={'width_ratios': [1, 3]})
+    sns.set(rc={'figure.figsize':(9, 5)})
+    fig, (ax1, ax2, ax3) = plt.subplots(ncols=3, sharey=True, gridspec_kw={'width_ratios': [1, 3, 2]})
 
     # ax = sns.pointplot(data=df, hue='Group', y=label, dodge=True, capsize=.1, width=.5, ci=95, seed=0, join=True)
 
     # left figure, Overvall 
-    sns.pointplot(ax=ax1, data=df_temp, x='Difficulty', order=order[:1], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, width=.5, ci=95, seed=0, join=False)
+    # sns.pointplot(ax=ax1, data=df_temp, x='Difficulty', order=order[:1], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, width=.5, ci=95, seed=0, join=False)
+    sns.pointplot(ax=ax1, data=df_temp, x='Difficulty', order=order[:1], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, ci=95, seed=0, join=False)
     ax1.set(xlabel=None, ylabel=ylabel) #, title=title)
     ax1.get_legend().remove()
 
     # right figure, per Difficulty
-    sns.pointplot(ax=ax2, data=df, x='Difficulty', order=order[1:], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, width=.5, ci=95, seed=0, join=True)
+    # sns.pointplot(ax=ax2, data=df, x='Difficulty', order=order[1:], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, width=.5, ci=95, seed=0, join=True)
+    sns.pointplot(ax=ax2, data=df, x='Difficulty', order=order[1:], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, ci=95, seed=0, join=True)
     ax2.set(xlabel='Video Difficulty', ylabel=None) #, title=title)
-    plt.legend(loc='lower right')
+    ax2.get_legend().remove()
+    # plt.legend(loc='lower right')
+
+    sns.pointplot(ax=ax3, data=df, x='tenure_group', order=['Rookie', 'Veteran'], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, ci=95, seed=0, join=True)
+    ax3.set(xlabel='Rookie vs. Veteran', ylabel=None)
+    ax3.get_legend().remove()
 
     plt.ylim(0.0, 1.45)
+    plt.legend(loc='lower right')
     plt.tight_layout()
     plt.savefig(os.path.join(base_dir, f'fig_{part_label}_task_time.pdf'))
     plt.savefig(os.path.join(base_dir, f'fig_{part_label}_task_time.png'))
@@ -623,11 +681,13 @@ if __name__ == "__main__":
     prefix = "AB testing time analysis"
     api_key = "AXZngREC8oBJS-Hy14Wy"
 
-    part1_dir = '/home/cyxu/hdd/ego4d_eval/AB_testing_results/part_1_progress_check/'
-    part2_dir = '/home/cyxu/hdd/ego4d_eval/AB_testing_results/part_2_progress_check/'
+    id_tenure_csv = "user_study_results/id_tenure_pairs.csv"
 
-    part1_raw = '/home/cyxu/hdd/ego4d_eval/clips_for_AB_testing_finally_selected/grouped_tasks'
-    part2_raw = '/home/cyxu/hdd/ego4d_eval/clips_for_AB_testing_finally_selected/shared_tasks'
+    part1_dir = 'user_study_results/part_1_progress_check/'
+    part2_dir = 'user_study_results/part_2_progress_check/'
+
+    part1_raw = 'data/grouped_tasks'
+    part2_raw = 'data/shared_tasks'
 
     # Part 1 clips
     part1_clips = collect_AB_clips(part1_raw)
@@ -643,11 +703,12 @@ if __name__ == "__main__":
     df_B = pd.read_csv(group_B_csv)
     df_C = pd.read_csv(group_C_csv)
     part2_df = pd.read_csv(part2_csv)
+    id_tenure = pd.read_csv(id_tenure_csv, dtype=str)
 
     part1_dfs = [df_A, df_B, df_C]
     groups = ["group_A", "group_B", "group_C"]
 
-    df1, df2 = df_preprocess(part1_dfs, part2_df, part1_clips, part1_dir, part2_clips, part2_dir)
+    df1, df2 = df_preprocess(part1_dfs, part2_df, part1_clips, part1_dir, part2_clips, part2_dir, id_tenure)
 
     df1_anova = df1[df1['Outlier'] == 0]
     df2_anova = df2[df2['Outlier'] == 0]
@@ -681,9 +742,9 @@ if __name__ == "__main__":
     # histogram_plots(df2_anova, part2_dir, order)
 
     # pointplot(df1_anova, part1_dir, order, 'Part 1', 'Speed')
-    # pointplot(df1_anova, part1_dir, order, 'part1', 'Duration', ext=ext)
+    pointplot(df1_anova, part1_dir, order, 'part1', 'Duration', ext=ext)
     # Part 2 clips
-    # pointplot(df2_anova, part2_dir, order, 'part2', 'Duration', ext='Without AI assistance')
+    pointplot(df2_anova, part2_dir, order, 'part2', 'Duration', ext='Without AI assistance')
 
     breakpoint()
 

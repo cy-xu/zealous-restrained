@@ -326,7 +326,7 @@ if __name__ == "__main__":
     # cost_thresholds = [0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
     # cost_thresholds = np.linspace(0.1, 0.9, 9)
 
-    base_dir = '/home/cyxu/hdd/ego4d_eval/AB_testing_results/'
+    base_dir = 'user_study_results/'
 
     if plot_part2:
         df_path = base_dir + 'part_2_progress_check/df2_combined.csv'
@@ -348,12 +348,12 @@ if __name__ == "__main__":
 
         AI_methods = ['Appen_json', 'Byte_json', 'Retina_0.3']
         methods_dict ={
-            'A':'Human Only',
+            'A':'Human Only, Group A',
+            'B':'Restrained AI + Group B',
+            'C':'Zealous AI + Group C',
             'Retina_0.3':'Autonomous AI',
-            'Byte_json':'Aggressive AI',
-            'B':'Aggressive AI + Human',
-            'Appen_json':'Conservative AI',
-            'C':'Conservative AI + Human',
+            'Byte_json':'Restrained AI',
+            'Appen_json':'Zealous AI',
             }
             # 'Retina_0.01':'Conservative FaceDetector',
             # 'Retina_0.8':'Aggressive FaceDetector',
@@ -447,11 +447,9 @@ if __name__ == "__main__":
     print()
 
     # add overall to difficulty
-    df_overall = df_pr.copy()
-    for idx, row in df_pr.iterrows():
-        row_new = row.copy()
-        row_new['Difficulty'] = 'Overall'
-        df_overall = df_overall.append(row_new)
+    df_copy = df_pr.copy()
+    df_copy['Difficulty'] = 'Overall'
+    df_overall = pd.concat([df_pr, df_copy])
 
     # concept_improvement_plot(judge_dir)
 
@@ -459,7 +457,7 @@ if __name__ == "__main__":
 
     # improvement_plot_single(df_overall, precision_recall_F1_AI, judge_dir, part2=plot_part2)
 
-    # per_worker_plot(df_overall, judge_dir, difficulties, cost_thresholds, part2=plot_part2)
+    per_worker_plot(df_overall, judge_dir, difficulties, cost_thresholds, part2=plot_part2)
 
     # per_judgement_plot_each_method(df_pr, judge_dir, part2=plot_part2)
 
