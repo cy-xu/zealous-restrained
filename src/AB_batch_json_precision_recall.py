@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import pingouin as pg
 
+from sklearn.preprocessing import PowerTransformer
+
 
 def one_video_precision_recall(gt_json, rater_judgements, cost_thresholds, consider_optional):
     # thresholds used in linear_assignment, thus
@@ -316,6 +318,49 @@ def per_worker_plot(df_pr, judge_dir, order, cost_thresholds, part2=False):
     plt.savefig(judge_dir+f'{prefix}_AB_testing_recall_per_judgement.pdf')
     plt.savefig(judge_dir+f'{prefix}_AB_testing_recall_per_judgement.png')
 
+def novice_veteran_plot(df_pr, judge_dir, order, cost_thresholds, part2=False):
+    # plot the transition from AI pre-annotation to rater judgements
+    sns.set(rc={"figure.dpi":300, 'savefig.dpi':300})
+    prefix = 'Part2' if part2 else 'Part1'
+
+    vis_order = ['Overall', 'Novice', 'Veteran']
+    group_order = list(methods_dict.values())[:3]
+
+    # plot the points
+    fig, axs = plt.subplots(1, 3, figsize=(9, 3), sharey=True, sharex=True)
+
+    condition_0 = (df_pr['Difficulty'] == 'Overall')
+
+    for i in range(3):
+        
+        tenure = vis_order[i]
+
+        if i==0:
+            condition = condition_0
+        else:
+            condition = (df_pr['Difficulty'] == 'Overall') & (df_pr['tenure_group'] == tenure)
+
+        df_temp = df_pr.loc[condition]
+
+        g = sns.stripplot(ax=axs[i], x="Recall", y="Method", data=df_temp, order=group_order, dodge=True, alpha=.25, zorder=1)
+
+        sns.pointplot(ax=axs[i], x="Recall", y="Method",
+                    data=df_temp, order=group_order, dodge=.8 - .8 / 3,
+                    join=False, palette="dark",
+                    markers="d", scale=.75, ci=None)
+
+        g.set_xlim(0, 100)
+
+        axs[i].set_title(tenure)
+        axs[i].set_xlabel('Recall (%)')
+        axs[i].set_ylabel('')
+
+    # plt.legend(bbox_to_anchor=(1.05, 0.5), loc='center left', borderaxespad=0)
+    plt.tight_layout()
+
+    plt.savefig(judge_dir+f'{prefix}_AB_testing_recall_by_tenure.pdf')
+    plt.savefig(judge_dir+f'{prefix}_AB_testing_recall_by_tenure.png')
+
 
 
 if __name__ == "__main__":    
@@ -333,13 +378,15 @@ if __name__ == "__main__":
         judge_dir = base_dir + 'part_2_merged_judgements/'
         gt_dir = judge_dir + 'reviewed_judgements_optional_consensus_0.75_IOU_0.3/'
 
-        AI_methods = ['Retina_json']
+        # AI_methods = ['Retina_0.3']
+        AI_methods = []
         methods_dict = {
             'A':'Human only, Group A',
             'B':'Human only, Group B',
             'C':'Human only, Group C',
-            'Retina_json':'FaceDetector'
+            'Retina_0.3':'Autonomous AI',
             }
+            # 'Retina_json':'FaceDetector'
 
     else:
         df_path = base_dir + 'part_1_progress_check/df_combined.csv'
@@ -421,6 +468,15 @@ if __name__ == "__main__":
                     df_pr.loc[i, 'Recall_' + methods_dict[AI_method]] = round(rec.item(), 5)
                     df_pr.loc[i, 'F1_' + methods_dict[AI_method]] = round(f1.item(), 5)
 
+        # box-cox transform on Duration, F1, Recall for later processing 
+        for var in ["Duration", "F1", "Recall"]:
+            pt = PowerTransformer(method='box-cox', standardize=True)
+            data = df_pr[var].values.reshape(-1, 1)
+            new_var = var + '_transformed'
+            df_pr[new_var] = pt.fit_transform(data)
+            print(f'old {var}: {df_pr[var].mean()} {df_pr[var].std()}')
+            print(f'new {new_var}: {df_pr[new_var].mean()} {df_pr[new_var].std()}')
+
         # save updated df
         df_pr.to_csv(df_save_path, index=False)
 
@@ -451,6 +507,9 @@ if __name__ == "__main__":
     df_copy['Difficulty'] = 'Overall'
     df_overall = pd.concat([df_pr, df_copy])
 
+    # if filter out low recall outliers
+    # df_overall = df_overall[df_overall['Recall']>50]
+
     # concept_improvement_plot(judge_dir)
 
     # improvement_plot(df_overall, precision_recall_F1_AI, judge_dir, difficulties[:1], part2=plot_part2)
@@ -459,13 +518,28 @@ if __name__ == "__main__":
 
     per_worker_plot(df_overall, judge_dir, difficulties, cost_thresholds, part2=plot_part2)
 
+    novice_veteran_plot(df_overall, judge_dir, difficulties, cost_thresholds, part2=plot_part2)
+
     # per_judgement_plot_each_method(df_pr, judge_dir, part2=plot_part2)
 
     # comparing just AI initializations
     # df_overall_AI = df_overall[(df_overall['Method'] == 'Aggressive AI') & (df_overall['Method'] == 'Conservative AI')]
     
     breakpoint()
-    
+
+    ############# Revision ananylisis #############
+
+    pg.homoscedasticity(data=df_pr, dv='F1', group='Group')
+
+    # df_pr['F1_box'] = scipy.stats.boxcox(f1, -3)
+    # pg.homoscedasticity(data=df_pr, dv='F1_box', group='Group')
+    #                W     pval  equal_var
+    # levene  2.272688  0.10332       True
+
+
+
+    ############## Initial submission ##############
+
     # compare each team with their AI initialization
     df_AI_only = pd.melt(df_pr, id_vars=['Group'], value_vars=['F1_Aggressive AI', 'F1_Conservative AI', 'F1'])
     df_B_only = df_AI_only[df_AI_only['Group'] == 'B']

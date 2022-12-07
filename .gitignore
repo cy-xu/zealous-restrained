@@ -1,4 +1,6 @@
-user_study_results
+user_study_results/
+data/
+*.mp4
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

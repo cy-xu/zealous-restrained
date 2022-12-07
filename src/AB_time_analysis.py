@@ -15,7 +15,9 @@ from statsmodels.formula.api import ols
 import pingouin as pg
 
 BASE_DIR = 'user_study_results/'
-ROOKIE_MONTH = 3
+OUTLIER_FACTOR = 3
+
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 
 old_difficulty_dict = {
         '6c1bac5c-aead-40b8-9c17-be97d86b68d4_segment1': 'Easy',
@@ -192,7 +194,7 @@ def reject_outliers(df_new):
         median = np.median(records)
         median_residuals = np.abs(records - median)
         MAD = np.median(median_residuals)  * 1.4826
-        upper_bound = median + 3 * MAD
+        upper_bound = median + OUTLIER_FACTOR * MAD
 
         # lower_bound = max(0, median - 3 * MAD)
         lower_bound = 0.1
@@ -243,48 +245,79 @@ def download_judgements(df, clips):
     return df
 
 
-def match_id_and_tenure(df, id_tenure):
+def match_id_and_tenure(df1, df2, id_tenure):
     # build three dictionaries for three types of worker IDs to match with
     # worker tenure in months
     # id1, id2, id3 = {}, {}, {}
+    # df_both = pd.concat([df1, df2], ignore_index=True)
     id_dicts = {'id1':{}, 'id2':{}, 'id3':{}}
+    groups = {'A': {}, 'B': {}, 'C': {}}
     missing_tenure = set()
 
     for row in id_tenure.iterrows():
         for id in id_dicts.keys():
             id_str = str(row[1][id])
             if id_str != 'N/A':
-                id_dicts[id][id_str] = int(row[1]['tenure_month'])
+                tenure_month = int(row[1]['tenure_month'])
+                id_dicts[id][id_str] = tenure_month
+                groups[row[1]['Group']].setdefault(id_str, tenure_month)
 
     tenure_list = list(id_dicts['id1'].values())
-    print(f'# of rookies (< 10 months): {np.sum(np.array(tenure_list) <= ROOKIE_MONTH)}')
-    print(f'# of veterans (>= 10 months): {np.sum(np.array(tenure_list) > ROOKIE_MONTH)}')
+    Novice_threshold = np.median(tenure_list)
+
+    print(f'# of novice: {np.sum(np.array(tenure_list) < Novice_threshold)}')
+    print(f'# of veterans: {np.sum(np.array(tenure_list) >= Novice_threshold)}')
 
     # plot the tenure distribution as a histogram using seaborn and save it
-    sns.histplot(tenure_list, bins=60)
-    plt.savefig(BASE_DIR + 'tenure_distribution.png')
-    
-    # match worker ID and tenure
-    for i, row in df.iterrows():
-        worker_id = str(row['_worker_id'])
-        if worker_id in id_dicts['id1'].keys():
-            df.loc[i, 'tenure'] = id_dicts['id1'][worker_id]
-        elif worker_id in id_dicts['id2'].keys():
-            df.loc[i, 'tenure'] = id_dicts['id2'][worker_id]
-        else:
-            df.loc[i, 'tenure'] = -1
+    sns.set(rc={'figure.figsize':(6, 4)})
+    sns.histplot(tenure_list, bins=30)
+    # draw a vertical line at the median tenure
+    plt.axvline(x=Novice_threshold, color='r', linestyle='--')
+    # set x y labels
+    plt.xlabel('Experience (months)')
+    plt.ylabel('Count')
+    # make y axis only integer
+    plt.yticks(np.arange(0, 16, 5))
+    plt.tight_layout()
+    plt.savefig(BASE_DIR + 'tenure_distribution.pdf')
 
-        curr_tenure = df.loc[i, 'tenure']
+    for df in [df1, df2]:
 
-        if curr_tenure == -1:
-            missing_tenure.add(worker_id)
-            df.loc[i, 'tenure_group'] = 'Rookie'
-        elif curr_tenure <= ROOKIE_MONTH:
-            df.loc[i, 'tenure_group'] = 'Rookie'
-        else:
-            df.loc[i, 'tenure_group'] = 'Veteran'
+        # match worker ID and tenure
+        for i, row in df.iterrows():
+            worker_id = str(row['_worker_id'])
+            if worker_id in id_dicts['id1'].keys():
+                df.loc[i, 'tenure'] = id_dicts['id1'][worker_id]
+            elif worker_id in id_dicts['id2'].keys():
+                df.loc[i, 'tenure'] = id_dicts['id2'][worker_id]
+            else:
+                df.loc[i, 'tenure'] = -1
+
+            curr_tenure = df.loc[i, 'tenure']
+
+            if curr_tenure == -1:
+                missing_tenure.add(worker_id)
+                df.loc[i, 'tenure_group'] = 'Novice'
+            elif curr_tenure <= Novice_threshold:
+                df.loc[i, 'tenure_group'] = 'Novice'
+            else:
+                df.loc[i, 'tenure_group'] = 'Veteran'
         
     print(f'the following IDs are missing tenure: {missing_tenure}')
+
+    return df1, df2
+
+def n_way_label(df, column_label, labels):
+    #  create a new column that contains the n-way label
+    # for each row append the label
+    df[column_label] = ''
+
+    for i, row in df.iterrows():
+        new_label = row[labels[0]]
+        for label in labels[1:]:
+            new_label = new_label + "_" + str(row[label])
+
+        df.loc[i, column_label] = new_label
 
     return df
 
@@ -332,12 +365,20 @@ def df_preprocess(dfs, df2, part1_clips, part1_dir, part2_clips, part2_dir, id_t
     df_new = download_judgements(df_new, part1_clips)
     df2_new = download_judgements(df2_new, part2_clips)
 
-    df_new = match_id_and_tenure(df_new, id_tenure)
-    df2_new = match_id_and_tenure(df2_new, id_tenure)
+    df_new, df2_new = match_id_and_tenure(df_new, df2_new, id_tenure)
+    # df2_new = match_id_and_tenure(, id_tenure)
 
     df_new = df_new.sort_values(by=['Start_time'])
     df2_new = df2_new.sort_values(by=['Start_time'])
 
+    # df_new = n_way_label(df_new, 'group_difficulty', ['Group', 'Difficulty'])
+    # df_new = n_way_label(df_new, 'group_tenure', ['Group', 'tenure_group'])
+    # df_new = n_way_label(df_new, 'group_difficulty_tenure', ['Group', 'Difficulty', 'tenure_group'])
+
+    # df2_new = n_way_label(df2_new, 'group_difficulty', ['Group', 'Difficulty'])
+    # df2_new = n_way_label(df2_new, 'group_tenure', ['Group', 'tenure_group'])
+    # df2_new = n_way_label(df2_new, 'group_difficulty_tenure', ['Group', 'Difficulty', 'tenure_group'])
+    
     # save new df to a csv file
     df_new.to_csv(os.path.join(part1_dir, 'df_combined.csv'), index=False)
     df2_new.to_csv(os.path.join(part2_dir, 'df2_combined.csv'), index=False)
@@ -419,26 +460,23 @@ def pointplot(df, base_dir, order, part_label, label='Speed', ext=''):
     df_temp = df_overall[df_overall['Difficulty'] == 'Overall']
 
     # plt.figure()
-    sns.set(rc={'figure.figsize':(9, 5)})
+    sns.set(rc={'figure.figsize':(6, 5)})
     fig, (ax1, ax2, ax3) = plt.subplots(ncols=3, sharey=True, gridspec_kw={'width_ratios': [1, 3, 2]})
 
-    # ax = sns.pointplot(data=df, hue='Group', y=label, dodge=True, capsize=.1, width=.5, ci=95, seed=0, join=True)
-
     # left figure, Overvall 
-    # sns.pointplot(ax=ax1, data=df_temp, x='Difficulty', order=order[:1], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, width=.5, ci=95, seed=0, join=False)
-    sns.pointplot(ax=ax1, data=df_temp, x='Difficulty', order=order[:1], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, ci=95, seed=0, join=False)
-    ax1.set(xlabel=None, ylabel=ylabel) #, title=title)
+    sns.pointplot(ax=ax1, data=df_temp, x='Difficulty', order=order[:1], hue_order=hue_order, y=label, hue='Group', dodge=0.3, capsize=.1, ci=95, seed=0, join=False)
+    ax1.set(xticklabels=[])  
+    ax1.set(xlabel='Group', ylabel=ylabel) #, title=title)
     ax1.get_legend().remove()
 
     # right figure, per Difficulty
-    # sns.pointplot(ax=ax2, data=df, x='Difficulty', order=order[1:], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, width=.5, ci=95, seed=0, join=True)
-    sns.pointplot(ax=ax2, data=df, x='Difficulty', order=order[1:], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, ci=95, seed=0, join=True)
+    sns.pointplot(ax=ax2, data=df, x='Difficulty', order=order[1:], hue_order=hue_order, y=label, hue='Group', dodge=0.3, capsize=.1, ci=95, seed=0, join=True)
     ax2.set(xlabel='Video Difficulty', ylabel=None) #, title=title)
     ax2.get_legend().remove()
     # plt.legend(loc='lower right')
 
-    sns.pointplot(ax=ax3, data=df, x='tenure_group', order=['Rookie', 'Veteran'], hue_order=hue_order, y=label, hue='Group', dodge=True, capsize=.1, ci=95, seed=0, join=True)
-    ax3.set(xlabel='Rookie vs. Veteran', ylabel=None)
+    sns.pointplot(ax=ax3, data=df, x='tenure_group', order=['Novice', 'Veteran'], hue_order=hue_order, y=label, hue='Group', dodge=0.3, capsize=.1, ci=95, seed=0, join=True)
+    ax3.set(xlabel='User Experience', ylabel=None)
     ax3.get_legend().remove()
 
     plt.ylim(0.0, 1.45)
@@ -715,49 +753,212 @@ if __name__ == "__main__":
 
     order = ["Overall", "Easy", "Medium", "Hard"]
 
-    # sort by start time to split into two parts
-    half_len = len(df1_anova) // 2
-    ext =''
-
-    # report if first half and second half have similar judgements for each video
-    # it is not entirely balanced between first and second half, thus not fair to compare the learning effect?
-    clips = df1_anova['Clip_name'].unique()
-    for level in order:
-        first_half = df1_anova.iloc[:half_len]
-        second_half = df1_anova.iloc[half_len:]
-        print(f'{np.sum(first_half.Difficulty==level)} vs. {np.sum(second_half.Difficulty==level)}')
-
-    # df1_anova = df1_anova.iloc[:half_len]
-    # ext ='part1_first_half'
-
-    # df1_anova = df1_anova.iloc[half_len:]
-    # ext ='part1_second_half'
-
-    # boxplot(df1_anova, part1_dir, order)
-    # barplot(df1_anova, part1_dir, order, ci='se', ext=ext)
-    # barplot(df1_anova, part1_dir, order, ci='sd', ext=ext)
-
-    # histogram of each video
-    # histogram_plots(df1_anova, part1_dir, order)
-    # histogram_plots(df2_anova, part2_dir, order)
-
     # pointplot(df1_anova, part1_dir, order, 'Part 1', 'Speed')
-    pointplot(df1_anova, part1_dir, order, 'part1', 'Duration', ext=ext)
+    pointplot(df1_anova, part1_dir, order, 'part1', 'Duration', ext='ext')
     # Part 2 clips
     pointplot(df2_anova, part2_dir, order, 'part2', 'Duration', ext='Without AI assistance')
 
-    breakpoint()
-
-    # statistical_analysis(df1_anova, 'part_1')
-
-    # two_way_anova(df1_anova, 'part_1')
+    #### Paper submission ANOVA/Welch Analysis
 
     # given different video difficulty
-    df1_temp = df1_anova[(df1_anova['Difficulty'] == 'Easy')]
-    anova_or_welch(df1_temp, 'part_1')
+    # df1_temp = df1_anova[(df1_anova['Difficulty'] == 'Easy')]
+    # anova_or_welch(df1_temp, 'part_1')
+
+    # df2_temp = df2_anova[df2_anova['Difficulty'] == 'Easy']
+    # anova_or_welch(df2_temp, 'part_2')
+
+
+    #### Revision -- redo N-way ANOVA
+
+    df1_mini = df1_anova[['Group', 'Duration', 'Difficulty' ,'tenure_group']]
+    import scipy.stats as stats
+    from sklearn.preprocessing import PowerTransformer
+    
+    # boxcox transform
+    duration = np.array(df1_mini['Duration'])
+    # df1_mini['Duration_transformed'] = stats.boxcox(duration, lmbda=0.1)
 
     breakpoint()
+    # Power transform
+    # pt = PowerTransformer(method='box-cox', standardize=True)
+    # duration = duration.reshape(-1, 1)
+    # print(pt.fit(duration))
+    # print(pt.transform(duration))
 
-    df2_temp = df2_anova[df2_anova['Difficulty'] == 'Easy']
-    anova_or_welch(df2_temp, 'part_2')
+    # df1_mini['Duration_transformed'] = pt.transform(duration).flatten()
 
+    # print(df1_mini['Duration_transformed'].describe())
+    # count    1.610000e+03
+    # mean    -6.619963e-18
+    # std      1.000311e+00
+    # min     -2.621209e+00
+    # 25%     -6.748357e-01
+    # 50%      2.594146e-02
+    # 75%      6.732021e-01
+    # max      3.012433e+00
+
+    print(pg.homoscedasticity(df1_mini, dv='Duration_transformed', group='Group', method='levene'))
+    # (Pdb)     print(pg.homoscedasticity(df1_mini, dv='Duration_transformed', group='Group', method='levene'))
+    #                W     pval  equal_var
+    # levene  1.370171  0.25436       True
+
+    # calculate each group's variance
+    # print(f'Outlier upper bound: mean + {OUTLIER_FACTOR} * std')
+    # for g in df1.Group.unique():
+    #     for d in df1.Difficulty.unique():
+    #         condition = (df1['Group'] == g) & (df1['Difficulty'] == d)
+    #         print(f'Group {g}, Difficulty {d}', )
+    #         print(f'{len(df1[condition])} After outlier rejection', len(df1_anova[condition]))
+    #         print(f'mean: {df1[condition].Duration.mean().round(2)}')
+    #         print(f'variance: {df1[condition].Duration.var().round(2)}')
+
+    # print(f"Group mean: {df1_anova.groupby('Group')['Duration'].mean()}")
+    # print(f"Group variance: {df1_anova.groupby('Group')['Duration'].var()}")
+
+    print(pg.homoscedasticity(data=df1_mini, dv='Duration', group='Group'))
+    #                 W          pval  equal_var
+    # levene  16.171457  1.113182e-07      False
+
+    print(pg.homoscedasticity(data=df1_mini, dv='Recall', group='Group'))
+
+
+    # Type II Sums of Squares should be used if there is no interaction between the independent variables.
+    # Unlike Type II, the Type III Sums of Squares do specify an interaction effect.
+    # https://towardsdatascience.com/anovas-three-types-of-estimating-sums-of-squares-don-t-make-the-wrong-choice-91107c77a27a
+
+    between = ['Group', 'Difficulty', 'tenure_group']
+
+    print(pg.anova(data=df1_mini, dv='Duration', between=between, detailed=True, effsize='np2', ss_type=3).round(4))
+    #                               Source        SS      DF       MS        F   p-unc     np2
+    # 0                              Group   17.7874     2.0   8.8937  32.0112  0.0000  0.0387
+    # 1                         Difficulty   50.0468     2.0  25.0234  90.0669  0.0000  0.1016
+    # 2                       tenure_group    9.9911     1.0   9.9911  35.9611  0.0000  0.0221
+    # 3                 Group * Difficulty    7.1986     4.0   1.7997   6.4775  0.0000  0.0160
+    # 4               Group * tenure_group    0.9031     2.0   0.4515   1.6252  0.1972  0.0020
+    # 5          Difficulty * tenure_group    1.2041     2.0   0.6021   2.1670  0.1149  0.0027
+    # 6  Group * Difficulty * tenure_group    1.0789     4.0   0.2697   0.9708  0.4224  0.0024
+    # 7                           Residual  442.3070  1592.0   0.2778      NaN     NaN     NaN
+
+    print(pg.pairwise_tukey(data=df1_mini, dv='Duration', between='Group', padjust='holm').round(4))
+
+    print(pg.pairwise_gameshowell(data=df1_anova, dv='Duration', between='group_difficulty', effsize='eta-square').round(4))
+    #            A         B  mean(A)  mean(B)    diff      se        T        df    pval  eta-square
+    # 0     A_Easy    A_Hard   0.5937   1.2200 -0.6263  0.0546 -11.4753  335.5394  0.0000      0.2880
+    # 1     A_Easy  A_Medium   0.5937   1.1619 -0.5681  0.0522 -10.8917  344.9999  0.0000      0.2645
+    # 2     A_Easy    B_Easy   0.5937   0.6355 -0.0418  0.0482  -0.8663  263.3828  0.9945      0.0028
+    # 3     A_Easy    B_Hard   0.5937   1.0475 -0.4538  0.0573  -7.9191  326.6341  0.0000      0.1623
+    # 4     A_Easy  B_Medium   0.5937   0.9566 -0.3629  0.0518  -7.0065  330.8280  0.0000      0.1326
+    # 5     A_Easy    C_Easy   0.5937   0.5609  0.0328  0.0461   0.7116  271.9744  0.9986      0.0018
+    # 6     A_Easy    C_Hard   0.5937   0.8569 -0.2632  0.0517  -5.0876  322.4512  0.0000      0.0758
+    # 7     A_Easy  C_Medium   0.5937   0.7279 -0.1342  0.0422  -3.1775  288.2123  0.0429      0.0306
+    # 8     A_Hard  A_Medium   1.2200   1.1619  0.0581  0.0599   0.9708  411.7596  0.9883      0.0023
+    # 9     A_Hard    B_Easy   1.2200   0.6355  0.5845  0.0565  10.3438  335.9641  0.0000      0.2490
+    # 10    A_Hard    B_Hard   1.2200   1.0475  0.1725  0.0644   2.6773  402.3619  0.1593      0.0173
+    # 11    A_Hard  B_Medium   1.2200   0.9566  0.2634  0.0596   4.4208  399.2677  0.0004      0.0463
+    # 12    A_Hard    C_Easy   1.2200   0.5609  0.6591  0.0547  12.0546  338.9351  0.0000      0.3049
+    # 13    A_Hard    C_Hard   1.2200   0.8569  0.3631  0.0595   6.0993  392.1323  0.0000      0.0862
+    # 14    A_Hard  C_Medium   1.2200   0.7279  0.4921  0.0515   9.5593  337.0991  0.0000      0.1857
+    # 15  A_Medium    B_Easy   1.1619   0.6355  0.5263  0.0542   9.7150  339.6946  0.0000      0.2240
+    # 16  A_Medium    B_Hard   1.1619   1.0475  0.1143  0.0624   1.8325  400.5662  0.6604      0.0081
+    # 17  A_Medium  B_Medium   1.1619   0.9566  0.2052  0.0574   3.5770  407.7885  0.0116      0.0303
+    # 18  A_Medium    C_Easy   1.1619   0.5609  0.6009  0.0523  11.4978  348.9650  0.0000      0.2825
+    # 19  A_Medium    C_Hard   1.1619   0.8569  0.3049  0.0573   5.3196  399.3077  0.0000      0.0659
+    # 20  A_Medium  C_Medium   1.1619   0.7279  0.4339  0.0489   8.8721  361.0839  0.0000      0.1619
+    # 21    B_Easy    B_Hard   0.6355   1.0475 -0.4120  0.0591  -6.9660  331.4714  0.0000      0.1314
+    # 22    B_Easy  B_Medium   0.6355   0.9566 -0.3211  0.0538  -5.9659  327.1056  0.0000      0.1006
+    # 23    B_Easy    C_Easy   0.6355   0.5609  0.0746  0.0483   1.5425  266.8042  0.8343      0.0087
+    # 24    B_Easy    C_Hard   0.6355   0.8569 -0.2214  0.0538  -4.1182  319.9474  0.0016      0.0514
+    # 25    B_Easy  C_Medium   0.6355   0.7279 -0.0924  0.0447  -2.0673  267.1473  0.4980      0.0133
+    # 26    B_Hard  B_Medium   1.0475   0.9566  0.0909  0.0621   1.4640  389.7068  0.8715      0.0053
+    # 27    B_Hard    C_Easy   1.0475   0.5609  0.4866  0.0574   8.4774  329.5280  0.0000      0.1791
+    # 28    B_Hard    C_Hard   1.0475   0.8569  0.1906  0.0620   3.0721  383.8059  0.0573      0.0235
+    # 29    B_Hard  C_Medium   1.0475   0.7279  0.3196  0.0544   5.8793  318.6748  0.0000      0.0799
+    # 30  B_Medium    C_Easy   0.9566   0.5609  0.3957  0.0519   7.6244  334.6505  0.0000      0.1511
+    # 31  B_Medium    C_Hard   0.9566   0.8569  0.0997  0.0570   1.7494  385.8628  0.7153      0.0078
+    # 32  B_Medium  C_Medium   0.9566   0.7279  0.2287  0.0485   4.7139  343.2399  0.0001      0.0534
+    # 33    C_Easy    C_Hard   0.5609   0.8569 -0.2960  0.0518  -5.7099  326.1583  0.0000      0.0922
+    # 34    C_Easy  C_Medium   0.5609   0.7279 -0.1670  0.0424  -3.9421  293.7269  0.0032      0.0456
+    # 35    C_Hard  C_Medium   0.8569   0.7279  0.1290  0.0485   2.6627  331.9280  0.1655      0.0180
+
+    print(pg.pairwise_gameshowell(data=df1_anova, dv='Duration', between='group_tenure', effsize='eta-square').round(4))
+    #             A          B  mean(A)  mean(B)    diff      se        T        df    pval  eta-square
+    # 0    A_Novice  A_Veteran   0.9301   1.1649 -0.2348  0.0520  -4.5143  515.8218  0.0001      0.0356  *** 
+    # 1    A_Novice   B_Novice   0.9301   0.8598  0.0703  0.0445   1.5796  572.3614  0.6124      0.0043
+    # 2    A_Novice  B_Veteran   0.9301   0.9739 -0.0438  0.0541  -0.8094  455.3274  0.9658      0.0013
+    # 3    A_Novice   C_Novice   0.9301   0.6680  0.2621  0.0390   6.7153  507.0795  0.0000      0.0704  ***  Novice A/C
+    # 4    A_Novice  C_Veteran   0.9301   0.8233  0.1068  0.0496   2.1539  450.4466  0.2618      0.0095
+    # 5   A_Veteran   B_Novice   1.1649   0.8598  0.3051  0.0511   5.9738  508.1870  0.0000      0.0597  ***
+    # 6   A_Veteran  B_Veteran   1.1649   0.9739  0.1910  0.0596   3.2019  498.4815  0.0181      0.0198  *    Veteran A/B
+    # 7   A_Veteran   C_Novice   1.1649   0.6680  0.4969  0.0464  10.7145  416.4397  0.0000      0.1653  ***
+    # 8   A_Veteran  C_Veteran   1.1649   0.8233  0.3415  0.0555   6.1505  477.1977  0.0000      0.0741  ***  Veteran A/C
+    # 9    B_Novice  B_Veteran   0.8598   0.9739 -0.1141  0.0532  -2.1439  444.5896  0.2668      0.0086
+    # 10   B_Novice   C_Novice   0.8598   0.6680  0.1918  0.0378   5.0776  538.5635  0.0000      0.0407  ***  Novice B/C
+    # 11   B_Novice  C_Veteran   0.8598   0.8233  0.0364  0.0486   0.7502  442.0108  0.9754      0.0011  *
+    # 12  B_Veteran   C_Novice   0.9739   0.6680  0.3059  0.0487   6.2763  357.7554  0.0000      0.0677
+    # 13  B_Veteran  C_Veteran   0.9739   0.8233  0.1506  0.0575   2.6175  445.0889  0.0951      0.0151  *    Veteran B/C
+    # 14   C_Novice  C_Veteran   0.6680   0.8233 -0.1554  0.0436  -3.5624  350.6680  0.0056      0.0245
+
+
+    # CORRECTION: Difficulty is not within-subjects, because they are different videos?
+
+    print(pg.mixed_anova(data=df1_anova, dv='Duration', within='Difficulty', between='Group', subject='_worker_id').round(4))
+    #         Source       SS  DF1  DF2      MS        F   p-unc     np2     eps
+    # 0        Group   2.9605    2   73  1.4802   4.2155  0.0185  0.1035     NaN
+    # 1   Difficulty  10.3246    2  146  5.1623  87.8181  0.0000  0.5461  0.9568
+    # 2  Interaction   0.8031    4  146  0.2008   3.4155  0.0106  0.0856     NaN
+
+    print(pg.mixed_anova(data=df1_anova, dv='Duration', within='tenure_group', between='Group', subject='_worker_id').round(4))
+    # *** ValueError: cannot convert float NaN to integer
+
+    print(pg.pairwise_tests(data=df1_anova, dv='Duration', within='Difficulty', between='Group', subject='_worker_id', padjust='holm', effsize='eta-square', interaction=True, correction='auto').round(4))
+    #               Contrast Difficulty     A       B Paired  Parametric        T      dof alternative   p-unc  p-corr p-adjust       BF10  eta-square
+    # 0           Difficulty          -  Easy    Hard   True        True -11.6550  75.0000   two-sided  0.0000  0.0000     holm  3.292e+15      0.2687
+    # 1           Difficulty          -  Easy  Medium   True        True -10.3488  75.0000   two-sided  0.0000  0.0000     holm  1.504e+13      0.2159
+    # 2           Difficulty          -  Hard  Medium   True        True   3.0484  75.0000   two-sided  0.0032  0.0032     holm      8.745      0.0195
+    # 3                Group          -     A       B  False        True   0.8866  50.0000   two-sided  0.3795  0.3795     holm      0.385      0.0149
+    # 4                Group          -     A       C  False        True   2.9525  47.9836   two-sided  0.0049  0.0146     holm      8.549      0.1476
+    # 5                Group          -     B       C  False        True   1.9782  47.8398   two-sided  0.0537  0.1074     holm      1.366      0.0719
+    # 6   Difficulty * Group       Easy     A       B  False        True  -0.1631  50.0000   two-sided  0.8711  0.9998     holm      0.281      0.0005
+    # 7   Difficulty * Group       Easy     A       C  False        True   1.0097  47.9387   two-sided  0.3177  0.9754     holm      0.429      0.0198
+    # 8   Difficulty * Group       Easy     B       C  False        True   1.1799  47.9443   two-sided  0.2438  0.9754     holm        0.5      0.0269
+    # 9   Difficulty * Group       Hard     A       B  False        True   0.6796  50.0000   two-sided  0.4999  0.9998     holm      0.337      0.0088
+    # 10  Difficulty * Group       Hard     A       C  False        True   2.4015  47.6938   two-sided  0.0203  0.1419     holm      2.809      0.1036
+    # 11  Difficulty * Group       Hard     B       C  False        True   1.4696  47.1431   two-sided  0.1483  0.7415     holm      0.681      0.0408
+    # 12  Difficulty * Group     Medium     A       B  False        True   1.6101  50.0000   two-sided  0.1137  0.6820     holm      0.801      0.0475
+    # 13  Difficulty * Group     Medium     A       C  False        True   4.4485  44.9824   two-sided  0.0001  0.0005     holm    393.247      0.2783
+    # 14  Difficulty * Group     Medium     B       C  False        True   2.6512  45.2725   two-sided  0.0110  0.0881     holm      4.544      0.1206
+
+
+    print(pg.pairwise_tests(data=df1_anova, dv='Duration', within='Difficulty', between='tenure_group', subject='_worker_id', padjust='holm', effsize='eta-square', interaction=True, correction='auto').round(4))
+
+#                     Contrast Difficulty       A        B Paired  Parametric        T      dof alternative   p-unc  p-corr p-adjust       BF10  eta-square
+# 0                 Difficulty          -    Easy     Hard   True        True -11.7054  75.0000   two-sided  0.0000  0.0000     holm  4.039e+15      0.2715
+# 1                 Difficulty          -    Easy   Medium   True        True -10.3505  75.0000   two-sided  0.0000  0.0000     holm  1.514e+13      0.2160
+# 2                 Difficulty          -    Hard   Medium   True        True   3.0992  75.0000   two-sided  0.0027  0.0027     holm     10.002      0.0203
+# 3               tenure_group          -  Novice  Veteran  False        True  -2.5851  62.8444   two-sided  0.0121     NaN      NaN       3.99      0.0845
+# 4  Difficulty * tenure_group       Easy  Novice  Veteran  False        True  -2.2519  63.0809   two-sided  0.0278  0.0556     holm       2.05      0.0654
+# 5  Difficulty * tenure_group       Hard  Novice  Veteran  False        True  -2.6781  63.1132   two-sided  0.0094  0.0283     holm      4.876      0.0901
+# 6  Difficulty * tenure_group     Medium  Novice  Veteran  False        True  -1.7728  58.6154   two-sided  0.0815  0.0815     holm      0.914      0.0422
+
+
+    print(pg.mixed_anova(data=df1_anova, dv='Duration', within='tenure_group', between='Group', subject='_worker_id').round(5))
+    # *** ValueError: cannot convert float NaN to integer
+
+    # post hoc tests
+    print(pg.pairwise_tukey(data=df1_anova, dv='Duration', between=['Group', 'Difficulty'], effsize='eta-square').round(4))
+    # *** IndexError: arrays used as indices must be of integer (or boolean) type
+
+
+    # Part2
+    ###########################
+
+    print(pg.anova(data=df2_anova, dv='Duration', between=between, detailed=True, effsize='np2', ss_type=3).round(3))
+    #                               Source       SS     DF      MS       F  p-unc    np2
+    # 0                              Group    3.015    2.0   1.507   5.266  0.005  0.014
+    # 1                         Difficulty   30.010    2.0  15.005  52.418  0.000  0.121
+    # 2                       tenure_group    6.965    1.0   6.965  24.331  0.000  0.031
+    # 3                 Group * Difficulty    0.455    4.0   0.114   0.397  0.811  0.002
+    # 4               Group * tenure_group    2.776    2.0   1.388   4.848  0.008  0.013
+    # 5          Difficulty * tenure_group    0.180    2.0   0.090   0.315  0.730  0.001
+    # 6  Group * Difficulty * tenure_group    1.635    4.0   0.409   1.428  0.223  0.007
+    # 7                           Residual  218.985  765.0   0.286     NaN    NaN    NaN
