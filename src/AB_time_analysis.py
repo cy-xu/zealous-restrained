@@ -14,6 +14,7 @@ import statsmodels.api as sm
 from statsmodels.formula.api import ols
 import pingouin as pg
 
+BAD_ACTORS = [47095870]
 BASE_DIR = 'user_study_results/'
 OUTLIER_FACTOR = 3
 
@@ -94,11 +95,6 @@ def get_judgement_time(row):
 
     return start_t, round(duration, 3), round(speed, 2), round(efficiency, 2)
 
-def reject_outliers(data, m=2):
-    # if not np array, convert to np array
-    if not isinstance(data, np.ndarray):
-        data = np.array(data)
-    return data[abs(data - np.mean(data)) < m * np.std(data)]
 
 def add_time_and_speed(df_new):
     # add speed and time for each row
@@ -181,9 +177,11 @@ def add_json_paths(df_new, part1_clips):
             df_new.at[row[0], 'Retina_0.8'] = part1_clips[clip]['retina_0.8']
     return df_new
 
-def reject_outliers(df_new):
+def reject_time_outliers(df_new):
     # reject outlier jedgements in each video and group
-    df_new['Outlier'] = 0
+    df_new['time_outlier'] = 0
+    df_new['worker_outlier'] = 0
+
     unique_jobs = df_new['_unit_id'].unique()
     # unique_jobs = df_new['Clip_name'].unique()
     # outlier_label = 'Speed' # or 'Duration'
@@ -201,8 +199,15 @@ def reject_outliers(df_new):
         # 0.1 * 60 = 6 mins, here we reject if someones spent less than 6 mins on a clip
 
         for row in df_new[df_new['_unit_id'] == job].iterrows():
+
             if row[1][outlier_label] > upper_bound or row[1][outlier_label] < lower_bound:
-                df_new.at[row[0], 'Outlier'] = 1
+                df_new.at[row[0], 'time_outlier'] = 1
+
+            # additionally, reject the bad actor from time stats as well
+            elif row[1]['_worker_id'] in BAD_ACTORS:
+                df_new.at[row[0], 'time_outlier'] = 1
+                df_new.at[row[0], 'worker_outlier'] = 1
+
     return df_new
 
 def download_judgements(df, clips):
@@ -359,8 +364,8 @@ def df_preprocess(dfs, df2, part1_clips, part1_dir, part2_clips, part2_dir, id_t
     df_new = add_difficulty(df_new)
     df2_new = add_difficulty(df2_new, part2=True)
 
-    df_new = reject_outliers(df_new)
-    df2_new = reject_outliers(df2_new)
+    df_new = reject_time_outliers(df_new)
+    df2_new = reject_time_outliers(df2_new)
 
     df_new = download_judgements(df_new, part1_clips)
     df2_new = download_judgements(df2_new, part2_clips)
@@ -464,18 +469,18 @@ def pointplot(df, base_dir, order, part_label, label='Speed', ext=''):
     fig, (ax1, ax2, ax3) = plt.subplots(ncols=3, sharey=True, gridspec_kw={'width_ratios': [1, 3, 2]})
 
     # left figure, Overvall 
-    sns.pointplot(ax=ax1, data=df_temp, x='Difficulty', order=order[:1], hue_order=hue_order, y=label, hue='Group', dodge=0.3, capsize=.1, ci=95, seed=0, join=False)
+    sns.pointplot(ax=ax1, data=df_temp, x='Difficulty', order=order[:1], hue_order=hue_order, y=label, hue='Group', dodge=0.1, capsize=.1, ci=95, seed=0, join=False)
     ax1.set(xticklabels=[])  
     ax1.set(xlabel='Group', ylabel=ylabel) #, title=title)
     ax1.get_legend().remove()
 
     # right figure, per Difficulty
-    sns.pointplot(ax=ax2, data=df, x='Difficulty', order=order[1:], hue_order=hue_order, y=label, hue='Group', dodge=0.3, capsize=.1, ci=95, seed=0, join=True)
+    sns.pointplot(ax=ax2, data=df, x='Difficulty', order=order[1:], hue_order=hue_order, y=label, hue='Group', dodge=0.2, capsize=.1, ci=95, seed=0, join=True)
     ax2.set(xlabel='Video Difficulty', ylabel=None) #, title=title)
     ax2.get_legend().remove()
     # plt.legend(loc='lower right')
 
-    sns.pointplot(ax=ax3, data=df, x='tenure_group', order=['Novice', 'Veteran'], hue_order=hue_order, y=label, hue='Group', dodge=0.3, capsize=.1, ci=95, seed=0, join=True)
+    sns.pointplot(ax=ax3, data=df, x='tenure_group', order=['Novice', 'Veteran'], hue_order=hue_order, y=label, hue='Group', dodge=0.2, capsize=.1, ci=95, seed=0, join=True)
     ax3.set(xlabel='User Experience', ylabel=None)
     ax3.get_legend().remove()
 
@@ -748,8 +753,8 @@ if __name__ == "__main__":
 
     df1, df2 = df_preprocess(part1_dfs, part2_df, part1_clips, part1_dir, part2_clips, part2_dir, id_tenure)
 
-    df1_anova = df1[df1['Outlier'] == 0]
-    df2_anova = df2[df2['Outlier'] == 0]
+    df1_anova = df1[df1['time_outlier'] == 0]
+    df2_anova = df2[df2['time_outlier'] == 0]
 
     order = ["Overall", "Easy", "Medium", "Hard"]
 

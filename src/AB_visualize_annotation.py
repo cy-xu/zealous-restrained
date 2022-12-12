@@ -12,7 +12,7 @@ if __name__ == "__main__":
 
     cwd = os.getcwd()
     base_dir = os.path.join(cwd, 'user_study_results')
-    part1 = False
+    part1 = True
     bad_annotation_dict = {}
     breakpoint()
 
@@ -27,14 +27,14 @@ if __name__ == "__main__":
     # iterate through df and visualize clips with Recall lower than 0.5
     for i, row in df.iterrows():
         recall = round(row['Recall'])
+        group = row['Group']
         temp_dir = os.path.join(vis_dir, 'temp_dir')
         os.makedirs(temp_dir, exist_ok=True)
 
-        if recall < 50:
+        if recall < 75 and group == 'C':
             # create out dirs for images and videos
             worker = row['_worker_id']
             duration = row['Duration']
-            group = row['Group']
             clip = row['Clip_name']
             video_path = row['Video_path']
             rator_json = row['Rater_json']
@@ -46,8 +46,6 @@ if __name__ == "__main__":
             else:
                 bad_annotation_dict[worker] += 1
             
-            continue
-
             rator_tracks = ADAP_json_to_Tracks(rator_json)
 
             video_out_path = os.path.join(vis_dir, f'Recall-{recall}_F1-{F1}_Group-{group}_tenure-{tenure}_worker-{worker}_Duration-{duration}_{clip}.mp4')

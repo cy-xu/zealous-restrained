@@ -15,6 +15,7 @@ import pingouin as pg
 
 from sklearn.preprocessing import PowerTransformer
 
+BAD_ACTORS = [47095870]
 
 def one_video_precision_recall(gt_json, rater_judgements, cost_thresholds, consider_optional):
     # thresholds used in linear_assignment, thus
@@ -79,20 +80,20 @@ def scatterplot_method(df_pr, order, cost_thresholds):
 def improvement_plot_single(df_pr, PR_F1, judge_dir, part2=False):
     # plot the transition from AI pre-annotation to rater judgements
     sns.set(rc={"figure.dpi":300, 'savefig.dpi':300})
-    plt.figure(figsize=(7, 4))
+    plt.figure(figsize=(6.5, 4))
     # save precision recall as x, y coordinates for arrow plotting
     prefix = 'Part2' if part2 else 'Part1'
 
     # read emoji images as markers
     zm_s = 0.05
     zm_l = 0.06
-    robot_green = OffsetImage(plt.imread('evaluation/robot_1f916_green.png'), zoom=zm_l)
-    robot_orange = OffsetImage(plt.imread('evaluation/robot_1f916_orange.png'), zoom=zm_l)
-    robot_grey = OffsetImage(plt.imread('evaluation/robot_1f916_grey.png'), zoom=zm_l)
-    human_green = OffsetImage(plt.imread('evaluation/busts-in-silhouette_1f465_green.png'), zoom=zm_s)
-    human_orange = OffsetImage(plt.imread('evaluation/busts-in-silhouette_1f465_orange.png'), zoom=zm_s)
-    human_blue = OffsetImage(plt.imread('evaluation/busts-in-silhouette_1f465_blue.png'), zoom=zm_s)
-    emojis = [human_blue, robot_grey, robot_orange, human_orange, robot_green, human_green]
+    # robot_green = OffsetImage(plt.imread('evaluation/robot_1f916_green.png'), zoom=zm_l)
+    # robot_orange = OffsetImage(plt.imread('evaluation/robot_1f916_orange.png'), zoom=zm_l)
+    # robot_grey = OffsetImage(plt.imread('evaluation/robot_1f916_grey.png'), zoom=zm_l)
+    # human_green = OffsetImage(plt.imread('evaluation/busts-in-silhouette_1f465_green.png'), zoom=zm_s)
+    # human_orange = OffsetImage(plt.imread('evaluation/busts-in-silhouette_1f465_orange.png'), zoom=zm_s)
+    # human_blue = OffsetImage(plt.imread('evaluation/busts-in-silhouette_1f465_blue.png'), zoom=zm_s)
+    # emojis = [human_blue, robot_grey, robot_orange, human_orange, robot_green, human_green]
 
     # plot the points
     condition = (df_pr['Difficulty'] == 'Overall')
@@ -100,17 +101,18 @@ def improvement_plot_single(df_pr, PR_F1, judge_dir, part2=False):
 
     pres, recs = [], []
     marker_idx = 0
+    
     for method in methods_dict.values():
 
-        if method in ['Autonomous AI', 'Aggressive AI', 'Conservative AI']:
+        if method in ['Autonomous AI', 'Restrained AI', 'Zealous AI']:
             recall = PR_F1[method]['Recall']
             precision = PR_F1[method]['Precision']
             F1 = PR_F1[method]['F1']
             # marker = "d" # '^'
 
         else:
-            condition = (df_difficulty['Method'] == method)
-            df_method = df_difficulty.loc[condition]
+            condition = (df_pr['Method'] == method)
+            df_method = df_pr.loc[condition]
 
             recall = np.mean(df_method['Recall'])
             precision = np.mean(df_method['Precision'])
@@ -119,15 +121,6 @@ def improvement_plot_single(df_pr, PR_F1, judge_dir, part2=False):
 
         F1_figure = 2*precision*recall/(precision+recall)
         print(f'{method}, Precision:{precision:.2f}, Recall:{recall:.2f}, F1(figure): {F1_figure:.2f}, F1(ture mean):{F1:.2f}')
-
-        """
-        Human Only, Precision:92.39, Recall:94.40, F1(figure): 93.38, F1(ture mean):93.25
-        Autonomous AI, Precision:94.74, Recall:91.85, F1(figure): 93.27, F1(ture mean):93.04
-        Aggressive AI, Precision:97.39, Recall:89.73, F1(figure): 93.40, F1(ture mean):93.24
-        Aggressive AI + Human, Precision:96.34, Recall:97.43, F1(figure): 96.88, F1(ture mean):96.79
-        Conservative AI, Precision:88.01, Recall:94.05, F1(figure): 90.93, F1(ture mean):90.28
-        Conservative AI + Human, Precision:95.50, Recall:98.08, F1(figure): 96.78, F1(ture mean):96.66
-        """
 
         pres.append(precision)
         recs.append(recall)
@@ -284,7 +277,7 @@ def improvement_plot(df_pr, PR_F1, judge_dir, difficulties, part2=False):
     plt.savefig(judge_dir+f'{prefix}_AB_testing_precision_recall_changes.png')
 
 
-def per_worker_plot(df_pr, judge_dir, order, cost_thresholds, part2=False):
+def per_worker_plot(df_pr, judge_dir, order, part2=False):
     # plot the transition from AI pre-annotation to rater judgements
     sns.set(rc={"figure.dpi":300, 'savefig.dpi':300})
     prefix = 'Part2' if part2 else 'Part1'
@@ -292,7 +285,7 @@ def per_worker_plot(df_pr, judge_dir, order, cost_thresholds, part2=False):
     vis_order = list(methods_dict.values())[:3]
 
     # plot the points
-    fig, axs = plt.subplots(1, len(order), figsize=(15, 3), sharey=True, sharex=True)
+    fig, axs = plt.subplots(1, len(order), figsize=(13.5, 3), sharey=True, sharex=True)
     for i in range(len(order)):
         difficulty = order[i]
 
@@ -323,33 +316,27 @@ def novice_veteran_plot(df_pr, judge_dir, order, cost_thresholds, part2=False):
     sns.set(rc={"figure.dpi":300, 'savefig.dpi':300})
     prefix = 'Part2' if part2 else 'Part1'
 
-    vis_order = ['Overall', 'Novice', 'Veteran']
+    vis_order = ['Novice', 'Veteran']
     group_order = list(methods_dict.values())[:3]
+    group_order = ['A', 'B', 'C']
 
     # plot the points
-    fig, axs = plt.subplots(1, 3, figsize=(9, 3), sharey=True, sharex=True)
+    fig, axs = plt.subplots(1, 2, figsize=(6, 3), sharey=True, sharex=True)
 
-    condition_0 = (df_pr['Difficulty'] == 'Overall')
-
-    for i in range(3):
+    for i in range(len(vis_order)):
         
         tenure = vis_order[i]
-
-        if i==0:
-            condition = condition_0
-        else:
-            condition = (df_pr['Difficulty'] == 'Overall') & (df_pr['tenure_group'] == tenure)
-
+        condition = (df_pr['Difficulty'] == 'Overall') & (df_pr['tenure_group'] == tenure)
         df_temp = df_pr.loc[condition]
 
-        g = sns.stripplot(ax=axs[i], x="Recall", y="Method", data=df_temp, order=group_order, dodge=True, alpha=.25, zorder=1)
+        g = sns.stripplot(ax=axs[i], x="Recall", y="Group", data=df_temp, order=group_order, dodge=True, alpha=.25, zorder=1)
 
-        sns.pointplot(ax=axs[i], x="Recall", y="Method",
+        sns.pointplot(ax=axs[i], x="Recall", y="Group",
                     data=df_temp, order=group_order, dodge=.8 - .8 / 3,
                     join=False, palette="dark",
                     markers="d", scale=.75, ci=None)
 
-        g.set_xlim(0, 100)
+        g.set_xlim(75, 100)
 
         axs[i].set_title(tenure)
         axs[i].set_xlabel('Recall (%)')
@@ -361,13 +348,37 @@ def novice_veteran_plot(df_pr, judge_dir, order, cost_thresholds, part2=False):
     plt.savefig(judge_dir+f'{prefix}_AB_testing_recall_by_tenure.pdf')
     plt.savefig(judge_dir+f'{prefix}_AB_testing_recall_by_tenure.png')
 
+#------------------------------------------------------------------------------
+# accept a dataframe, remove outliers, return cleaned data in a new dataframe
+# see http://www.itl.nist.gov/div898/handbook/prc/section1/prc16.htm
+#------------------------------------------------------------------------------
+def label_outlier(df, extreme=False):    
+    # use in f1 based stats?
+    factor = 3.0 if extreme else 1.5
+    var = 'F1'
+    df['f1_outlier'] = 0
 
+    for g in ['A', 'B', 'C']:
+        df_g = df.loc[df['Group'] == g]
+
+        q1 = df_g[var].quantile(0.25)
+        q3 = df_g[var].quantile(0.75)
+        iqr = q3-q1 #Interquartile range
+
+        fence_low  = q1 - factor*iqr
+        fence_high = q3 + factor*iqr
+
+        # label ourliers in the 'f1_outlier' column
+        df.loc[(df['Group'] == g) & (df[var] < fence_low), 'f1_outlier'] = 1
+
+    return df
 
 if __name__ == "__main__":    
 
     plot_part2 = False
     consider_optional = True
     cost_thresholds = [0.5]
+    prefix = 'Part2' if plot_part2 else 'Part1'
     # cost_thresholds = [0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
     # cost_thresholds = np.linspace(0.1, 0.9, 9)
 
@@ -410,9 +421,11 @@ if __name__ == "__main__":
     # gt_dir = judge_dir + 'reviewed_judgements_with_optional/'
 
     df_save_path = judge_dir + f'AB_testing_precision_recall_IOU_{1-cost_thresholds[0]}.csv'
+    df_save_clean = judge_dir + f'{prefix}_data_clean.csv'
 
     if os.path.exists(df_save_path):
         df_pr = pd.read_csv(df_save_path)
+        df_clean = pd.read_csv(df_save_clean)
     else:
         # read combined dataframe first then add new columns
         df = pd.read_csv(df_path)
@@ -455,57 +468,119 @@ if __name__ == "__main__":
                 df_pr.loc[i, 'Method'] = methods_dict[method]
                 df_pr.loc[i, 'IOU_threshold'] = 1-t
     
+            if plot_part2: continue
+
             # collect precision and recall for APPEN and BYTE pre-annotation
-            for AI_method in AI_methods:
-                AI_json = row[AI_method]
+            if method == 'B':
+                AI_method = 'Byte_json'
+            elif method == 'C':
+                AI_method = 'Appen_json'
+            else:
+                AI_method = 'Retina_0.3'
 
-                for t in cost_thresholds:
-                    pre, rec = one_video_precision_recall(gt_json, [AI_json], [t], consider_optional)
+            AI_json = row[AI_method]
 
-                    f1 = 2 * pre * rec / (pre + rec)
-                    
-                    df_pr.loc[i, 'Precision_' + methods_dict[AI_method]] = round(pre.item(), 5)
-                    df_pr.loc[i, 'Recall_' + methods_dict[AI_method]] = round(rec.item(), 5)
-                    df_pr.loc[i, 'F1_' + methods_dict[AI_method]] = round(f1.item(), 5)
+            for t in cost_thresholds:
+                pre, rec = one_video_precision_recall(gt_json, [AI_json], [t], consider_optional)
 
-        # box-cox transform on Duration, F1, Recall for later processing 
-        for var in ["Duration", "F1", "Recall"]:
-            pt = PowerTransformer(method='box-cox', standardize=True)
-            data = df_pr[var].values.reshape(-1, 1)
-            new_var = var + '_transformed'
-            df_pr[new_var] = pt.fit_transform(data)
-            print(f'old {var}: {df_pr[var].mean()} {df_pr[var].std()}')
-            print(f'new {new_var}: {df_pr[new_var].mean()} {df_pr[new_var].std()}')
+                f1 = 2 * pre * rec / (pre + rec)
+                
+                df_pr.loc[i, 'Precision_initial'] = round(pre.item(), 5)
+                df_pr.loc[i, 'Recall_initial'] = round(rec.item(), 5)
+                df_pr.loc[i, 'F1_initial'] = round(f1.item(), 5)
+
+        trans_factors = ["Duration", "F1", "Recall"]
+
+        if not plot_part2:
+            # calculate the improvements
+            df_pr['F1_improvement'] = df_pr['F1'] - df_pr['F1_initial']
+            df_pr['Recall_improvement'] = df_pr['Recall'] - df_pr['Recall_initial']
+            # group A shouldn't have such improvements, remove them
+            df_pr.loc[df_pr['Group']=='A', 'F1_improvement'] = 0.0
+            df_pr.loc[df_pr['Group']=='A', 'Recall_improvement'] = 0.0
+
+            # trans_factors.extend([ "F1_initial", 'F1_improvement', 'Recall_improvement'])
+            trans_factors.extend([ "F1_initial"])
+
+        #  reject outliers based on F1 within each group
+        df_pr = label_outlier(df_pr, extreme = True)
+
+        # also reject users in the BAD_ACTOR list
+        df_pr['user_outlier'] = 0
+        df_pr.loc[df_pr['_worker_id'].isin(BAD_ACTORS), 'user_outlier'] = 1
+
+        # save a clean version just for statas analysis
+        clean_factors = ['Group', '_worker_id', 'Duration', 'Clip_name', 'Difficulty', 'Faces_per_frame', 'tenure_group', 'Precision', 'Recall', 'F1', 'Method', 'time_outlier', 'f1_outlier', 'user_outlier']
+
+        if not plot_part2:
+            clean_factors.extend(['Precision_initial', 'Recall_initial', 'F1_initial', 'Recall_improvement', 'F1_improvement'])
+
+        ###  For the revision, we just reject the bad actor
+
+        df_clean = df_pr[clean_factors]
+        df_clean = df_clean[(df_clean['user_outlier']==0)]
+
+        # box-cox transform on Duration, F1, Recall for later processing
+        for var in trans_factors:
+
+            method = 'yeo-johnson' if 'improvement' in var else 'box-cox'
+
+            for g in ['A', 'B', 'C']:
+                pt = PowerTransformer(method=method, standardize=False)
+                data = df_clean[df_clean['Group']==g][var].values.reshape(-1, 1)
+                new_var = var + '_transformed'
+                df_clean.loc[df_clean['Group']==g, new_var] = pt.fit_transform(data)
 
         # save updated df
         df_pr.to_csv(df_save_path, index=False)
+        df_clean.to_csv(df_save_clean, index=False)
 
     difficulties = ["Overall", "Easy", "Medium", "Hard"]
 
-    # print the accurate Precision, Recall and F1 score for each AI pre-annotation
-    # each method should be average over 24 videos only
-    precision_recall_F1_AI = {}
+    if not plot_part2:
 
-    for m in AI_methods:
-        method = methods_dict[m]
-        precision_recall_F1_AI[method] = {}
-        precisions, recalls, f1s = [], [], []
-        
-        for clip in df_pr.Clip_name.unique():
-            df_clip = df_pr[df_pr['Clip_name']==clip]
-            precisions.append(df_clip['Precision_' + method].values[0])
-            recalls.append(df_clip['Recall_' + method].values[0])
-            f1s.append(df_clip['F1_' + method].values[0])
-        precision_recall_F1_AI[method]['Precision'] = np.mean(precisions)
-        precision_recall_F1_AI[method]['Recall'] = np.mean(recalls)
-        precision_recall_F1_AI[method]['F1'] = np.mean(f1s)
+        # print the accurate Precision, Recall and F1 score for each AI pre-annotation
+        # each method should be average over 24 videos only
+        precision_recall_F1_AI = {}
+
+        for method in ['Autonomous AI','Restrained AI', 'Zealous AI']:
+            precision_recall_F1_AI[method] = {}
+            precisions, recalls, f1s = [], [], []
+            
+            for clip in df_clean.Clip_name.unique():
+                if method == 'Autonomous AI':
+                    group = 'A'
+                elif method == 'Restrained AI':
+                    group = 'B'
+                elif method == 'Zealous AI':
+                    group = 'C'
+
+                condition = (df_clean['Clip_name']==clip) & (df_clean['Group']==group)
+                df_clip = df_clean.loc[condition]
+
+                precisions.append(df_clip['Precision_initial'].values[0])
+                recalls.append(df_clip['Recall_initial'].values[0])
+                f1s.append(df_clip['F1_initial'].values[0])
+
+            precision_recall_F1_AI[method]['Precision'] = np.mean(precisions)
+            precision_recall_F1_AI[method]['Recall'] = np.mean(recalls)
+            precision_recall_F1_AI[method]['F1'] = np.mean(f1s)
 
     print()
 
+    # calcualte average user experience
+    unique_users = df_clean['_worker_id'].unique()
+    user_experience = {"A": [], "B": [], "C": []}
+    for user in unique_users:
+        group = df_clean[df_clean['_worker_id']==user]['Group'].values[0]
+        x = df_pr[df_pr['_worker_id']==user]['tenure'].values[0]
+        user_experience[group].append(x)
+    print(f"Average user experience: {np.mean(user_experience['A'])}, {np.mean(user_experience['B'])}, {np.mean(user_experience['C'])}")
+
     # add overall to difficulty
-    df_copy = df_pr.copy()
+    df_copy = df_clean.copy()
     df_copy['Difficulty'] = 'Overall'
-    df_overall = pd.concat([df_pr, df_copy])
+    df_clean_overall = pd.concat([df_clean, df_copy])
 
     # if filter out low recall outliers
     # df_overall = df_overall[df_overall['Recall']>50]
@@ -514,11 +589,21 @@ if __name__ == "__main__":
 
     # improvement_plot(df_overall, precision_recall_F1_AI, judge_dir, difficulties[:1], part2=plot_part2)
 
-    # improvement_plot_single(df_overall, precision_recall_F1_AI, judge_dir, part2=plot_part2)
+    if not plot_part2:
+        improvement_plot_single(df_clean_overall, precision_recall_F1_AI, judge_dir, part2=plot_part2)
 
-    per_worker_plot(df_overall, judge_dir, difficulties, cost_thresholds, part2=plot_part2)
+    # revised data with outliers rejection
+    # Human Only, Group A, Precision:93.47, Recall:95.61, F1(figure): 94.53, F1(ture mean):94.40
+    # Restrained AI + Group B, Precision:96.34, Recall:97.43, F1(figure): 96.88, F1(ture mean):96.79
+    # Zealous AI + Group C, Precision:95.50, Recall:98.08, F1(figure): 96.78, F1(ture mean):96.66
+    # Autonomous AI, Precision:94.74, Recall:91.85, F1(figure): 93.27, F1(ture mean):93.04
+    # Restrained AI, Precision:97.39, Recall:89.73, F1(figure): 93.40, F1(ture mean):93.24
+    # Zealous AI, Precision:88.01, Recall:94.05, F1(figure): 90.93, F1(ture mean):90.28
 
-    novice_veteran_plot(df_overall, judge_dir, difficulties, cost_thresholds, part2=plot_part2)
+
+    per_worker_plot(df_clean_overall, judge_dir, difficulties, part2=plot_part2)
+
+    novice_veteran_plot(df_clean_overall, judge_dir, difficulties, cost_thresholds, part2=plot_part2)
 
     # per_judgement_plot_each_method(df_pr, judge_dir, part2=plot_part2)
 
@@ -527,43 +612,35 @@ if __name__ == "__main__":
     
     breakpoint()
 
-    ############# Revision ananylisis #############
-
-    pg.homoscedasticity(data=df_pr, dv='F1', group='Group')
-
-    # df_pr['F1_box'] = scipy.stats.boxcox(f1, -3)
-    # pg.homoscedasticity(data=df_pr, dv='F1_box', group='Group')
-    #                W     pval  equal_var
-    # levene  2.272688  0.10332       True
-
-
-
-    ############## Initial submission ##############
+    ############## Initial submission + revision ##############
 
     # compare each team with their AI initialization
-    df_AI_only = pd.melt(df_pr, id_vars=['Group'], value_vars=['F1_Aggressive AI', 'F1_Conservative AI', 'F1'])
-    df_B_only = df_AI_only[df_AI_only['Group'] == 'B']
-    df_B_only = df_B_only.loc[~df_B_only['variable'].str.contains('Conservative')]
-
-    pg.homoscedasticity(data=df_B_only, dv='value', group='variable')
-    'false'
-    pg.welch_anova(data=df_B_only, dv='value', between='variable')
+    pg.welch_anova(data=df_clean, dv='F1', between='Group')
     """
-         Source  ddof1        ddof2          F         p-unc       np2
-    0  variable      1  1228.173106  178.39228  4.298412e-38  0.125594
+    === Revision data
+    Source  ddof1       ddof2          F         p-unc       np2
+    0  Group      2  970.028163  23.762437  8.412840e-11  0.042665
     """
 
-    df_AI_only = pd.melt(df_pr, id_vars=['Group'], value_vars=['F1_Aggressive AI', 'F1_Conservative AI', 'F1'])
-    df_C_only = df_AI_only[df_AI_only['Group'] == 'C']
-    df_C_only = df_C_only.loc[~df_C_only['variable'].str.contains('Aggressive')]
-    pg.homoscedasticity(data=df_C_only, dv='value', group='variable')
-    'false'
-    pg.welch_anova(data=df_C_only, dv='value', between='variable')
+    df_AI_only = pd.melt(df_clean, id_vars=['Group'], value_vars=['F1_initial', 'F1'])
+    df_one_group = df_AI_only[df_AI_only['Group'] == 'C']
+    pg.homoscedasticity(data=df_one_group, dv='value', group='variable')
+    pg.anova(data=df_one_group, dv='value', between='variable')
+    pg.welch_anova(data=df_one_group, dv='value', between='variable')
     """
+    # A: True (ANOVA)
+         Source  ddof1  ddof2          F         p-unc       np2
+    0  variable      1   1026  40.457306  3.021377e-10  0.037936
+
+    # B: False (Welch)
          Source  ddof1       ddof2           F         p-unc       np2
-    0  variable      1  837.860341  169.744837  1.820921e-35  0.120408
+    0  variable      1  849.098516  263.412596  8.496954e-52  0.202717
     """
 
+    # task completion time
+
+    df1_time = df_clean[df_clean["time_outlier"]==0]
+    print(np.mean(df1_time[df1_time["Group"]=='A']["Duration"]))
 
     # only consider the F1 score of Aggressive AI and Conservative AI pre-annotations
     df_AI_only = pd.melt(df_pr, id_vars=['Group'], value_vars=['F1_Aggressive AI', 'F1_Conservative AI', 'F1'])
